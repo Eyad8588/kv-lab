@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+models/
+cache/
+*.bin
+*.safetensors
+results/raw/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+graft/
+.ignore

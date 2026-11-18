@@ -1,0 +1,23 @@
+[project]
+name = "kv-lab"
+version = "0.1.0"
+description = "KV-cache save / restore / transfer benchmarks on Apple Silicon (llama.cpp + MLX)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx-lm>=0.28",
+    "httpx>=0.27",
+    "pandas>=2.2",
+    "matplotlib>=3.9",
+    "huggingface-hub>=0.26",
+    "zstandard>=0.23",
+]
+
+[project.scripts]
+kvlab = "kvlab.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kvlab"]
