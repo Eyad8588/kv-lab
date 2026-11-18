@@ -17,7 +17,8 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 import mlx.core as mx  # noqa: E402
 from mlx_lm import load, stream_generate  # noqa: E402
-from mlx_lm.models.cache import load_prompt_cache, make_prompt_cache, save_prompt_cache  # noqa: E402
+from mlx_lm.models.cache import (  # noqa: E402
+    load_prompt_cache, make_prompt_cache, save_prompt_cache, trim_prompt_cache)
 
 from . import prompts  # noqa: E402
 from .common import N_PREDICT  # noqa: E402
@@ -114,11 +115,17 @@ def main():
         path, out = sys.argv[4], sys.argv[5]
         cache = make_prompt_cache(model)
         res["prefill_s"] = _prefill(model, p.prefix_ids, cache)
+        mx.clear_cache()  # drop prefill scratch buffers; the KV cache stays resident
+        # WARM: same process, prefix KV already in memory (= ordinary prefix caching).
+        # Measured before saving so the big file write can't page the model out.
+        ttft, total, toks, text = _generate(model, tok, p.suffix_ids, cache)
+        res.update(warm_ttft_s=ttft, warm_total_s=total, warm_tokens=toks, warm_text=text)
+        # roll the cache back to exactly the prefix, then persist it
+        trim_prompt_cache(cache, cache[0].offset - len(p.prefix_ids))
+        assert cache[0].offset == len(p.prefix_ids)
         t0 = time.perf_counter()
         save_prompt_cache(path, cache, {"model": spec.hf_repo, "prefix_tokens": str(len(p.prefix_ids))})
         res["save_s"] = time.perf_counter() - t0
-        ttft, total, toks, text = _generate(model, tok, p.suffix_ids, cache)  # warm, same process
-        res.update(warm_ttft_s=ttft, warm_total_s=total, warm_tokens=toks, warm_text=text)
 
     elif phase == "restore":
         path, out = sys.argv[4], sys.argv[5]

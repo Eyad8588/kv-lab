@@ -35,11 +35,14 @@ def summarise(df: pd.DataFrame) -> pd.DataFrame:
     num = ["prefix_tokens", "cold_ttft_s", "cold_total_s", "warm_ttft_s", "restored_ttft_s",
            "restored_total_s", "restore_s", "save_s", "cache_bytes", "cold_peak_rss",
            "restored_peak_rss", "startup_s"]
+    num += [c for c in ("cold_peak_mlx", "restored_peak_mlx") if c in df.columns]
     g = df.groupby(["series", "backend", "model", "target_tokens"])
     s = g[num].median()
     s["runs"] = g.size()
     s["restored_identical_rate"] = g["restored_identical"].mean()
     s["warm_identical_rate"] = g["warm_identical"].mean()
+    df = df.assign(_rw=(df["restored_text"] == df["warm_text"]).astype(float))
+    s["restored_eq_warm_rate"] = df.groupby(["series", "backend", "model", "target_tokens"])["_rw"].mean()
     s["cold_correct_rate"] = g["cold_correct"].mean()
     s["restored_plus_load_s"] = s["restored_ttft_s"] + s["restore_s"]
     s["speedup_ttft"] = s["cold_ttft_s"] / s["restored_ttft_s"]
@@ -122,17 +125,20 @@ def _chart_breakeven(s: pd.DataFrame, tr: pd.DataFrame | None):
 
 
 def _chart_memory(s: pd.DataFrame):
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
     for b, d in s.groupby("series"):
         d = d.sort_values("target_tokens")
-        ax.plot(d["target_tokens"], d["cold_peak_rss"] / 2**30, marker="o", label=f"{b} cold")
-        ax.plot(d["target_tokens"], d["restored_peak_rss"] / 2**30, marker="x", ls="--", label=f"{b} restored")
+        ax.plot(d["target_tokens"], d["cold_peak_rss"] / 2**30, marker="o", label=f"{b} cold (RSS)")
+        ax.plot(d["target_tokens"], d["restored_peak_rss"] / 2**30, marker="x", ls="--", label=f"{b} restored (RSS)")
+        if "cold_peak_mlx" in d and d["cold_peak_mlx"].notna().any():
+            ax.plot(d["target_tokens"], d["cold_peak_mlx"] / 2**30, marker="s", ls=":",
+                    label=f"{b} cold (MLX allocator peak)")
     ax.set_xscale("log", base=2)
     ax.set_xlabel("prefix length (tokens)")
-    ax.set_ylabel("peak RSS (GiB)")
-    ax.set_title("Peak process memory")
+    ax.set_ylabel("peak memory (GiB)")
+    ax.set_title("Peak memory: RSS vs MLX allocator")
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=6.5)
     fig.tight_layout()
     fig.savefig(REPORTS / "memory.png", dpi=150)
     plt.close(fig)
@@ -140,8 +146,8 @@ def _chart_memory(s: pd.DataFrame):
 
 def _fmt_table(s: pd.DataFrame) -> str:
     hdr = ("| engine · model | prefix tok | cold TTFT | restore (load) | restored TTFT | restored+load | warm TTFT "
-           "| speedup (incl. load) | cache file | KiB/tok | identical output | correct |\n"
-           "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+           "| speedup (incl. load) | cache file | KiB/tok | restored = cold | restored = warm | answer correct |\n"
+           "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
     rows = []
     for _, r in s.sort_values(["series", "target_tokens"]).iterrows():
         rows.append(
@@ -149,7 +155,7 @@ def _fmt_table(s: pd.DataFrame) -> str:
             f"| {r['restore_s']*1000:,.0f} ms | {r['restored_ttft_s']*1000:,.0f} ms "
             f"| {r['restored_plus_load_s']*1000:,.0f} ms | {r['warm_ttft_s']*1000:,.0f} ms "
             f"| **{r['speedup_incl_load']:.1f}x** | {r['cache_bytes']/2**20:,.0f} MiB | {r['kib_per_token']:.0f} "
-            f"| {r['restored_identical_rate']:.0%} | {r['cold_correct_rate']:.0%} |")
+            f"| {r['restored_identical_rate']:.0%} | {r['restored_eq_warm_rate']:.0%} | {r['cold_correct_rate']:.0%} |")
     return hdr + "\n".join(rows)
 
 
