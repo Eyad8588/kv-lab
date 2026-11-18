@@ -175,3 +175,42 @@ def run(model_key: str, lengths: list[int], repeats: int, out_csv: Path | None =
             rows.append(row)
             append_csv(out_csv, [row])
     return rows
+
+
+def demo(model_key: str = "qwen2.5-0.5b", n: int = 16384) -> None:
+    """Walk through one save/restore cycle and print it step by step (~10 s)."""
+    spec = MODELS[model_key]
+    model = spec.gguf()
+    if model is None:
+        raise SystemExit(f"no GGUF for {model_key}; run `uv run kvlab fetch`")
+    slot_dir = CACHE_DIR / "demo"
+    ctx = n + CTX_PAD
+    fname = f"demo_{n}.bin"
+
+    def say(step, msg):
+        print(f"  {step:<10} {msg}", flush=True)
+
+    print(f"\nKV Lab demo · llama.cpp · {model_key} · {n:,}-token document\n")
+    a = Server(model, slot_dir, ctx)
+    p = prompts.build(spec, n, a.tokenize)
+    say("process A", f"llama-server started (pid {a.proc.pid})")
+    cold = a.complete(p.ids)
+    say("cold", f"read {len(p.ids):,} tokens from scratch  ->  first token after {cold['ttft_s']*1000:,.0f} ms")
+    a.complete(p.prefix_ids, n_predict=1)
+    save = a.slot("save", fname)
+    size = file_size(slot_dir / fname)
+    say("save", f"KV cache of {save.get('n_saved'):,} tokens -> {fname} "
+                f"({size / 2**20:,.0f} MiB, {save['timings']['save_ms']:.0f} ms)")
+    a.close()
+    say("kill", "process A stopped: its memory is gone")
+    b = Server(model, slot_dir, ctx)
+    say("process B", f"new llama-server started (pid {b.proc.pid})")
+    rest = b.slot("restore", fname)
+    say("restore", f"loaded {rest.get('n_restored'):,} tokens from file in {rest['timings']['restore_ms']:.0f} ms")
+    r = b.complete(p.ids)
+    say("restored", f"computed only {r['prompt_n']} new tokens  ->  first token after {r['ttft_s']*1000:,.0f} ms")
+    b.close()
+    total = r["ttft_s"] + rest["timings"]["restore_ms"] / 1000
+    same = "identical" if r["tokens"] == cold["tokens"] else "DIFFERENT"
+    print(f"\n  speedup    {cold['ttft_s'] / total:,.0f}x faster first token (incl. loading the file)")
+    print(f"  output     {same} to the cold run: {r['text'].strip()!r}\n")

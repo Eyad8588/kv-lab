@@ -2,7 +2,26 @@
 
 **Compute a long prompt's KV cache once, save it, and restore it in a new process (or on another machine): up to 207× faster time to first token on a MacBook.**
 
+## What it does (in simple words)
+
+Before an AI model can answer a question about a long document, it has to
+"read" the whole document, and that takes seconds. While reading, it builds a
+working memory of the text (the *KV cache*). KV Lab saves that memory to a file
+once. A brand-new program then loads the file instead of reading the document
+again, so it starts answering up to **207× sooner** and gives the same answer.
+The file is an ordinary file, so it can also be copied to another computer.
+
+```
+ 1. READ      program A reads the 32k-token document ............ 24.8 s
+ 2. SAVE      program A writes its memory to a file ............. 384 MiB
+ 3. RESTART   program A exits; its memory is gone
+ 4. LOAD      program B loads the file .......................... 0.05 s
+ 5. ANSWER    program B reads only the new question, then answers  0.07 s
+              → first word after 0.12 s instead of 24.8 s, same answer
+```
+
 ![TTFT: cold vs restored vs warm](reports/ttft.png)
+*Time to first token for each prompt length (log scale). Grey = read from scratch, blue = memory loaded from a file in a new process, green = memory never left RAM. Restoring from a file is almost as fast as never losing the memory.*
 
 ## The idea
 
@@ -94,11 +113,16 @@ The full table (every length, warm TTFT, memory) is in
   0.8 Gbit/s** (0.5B) or **2.6 to 5.8 Gbit/s** (1.7B, which has 9× more KV per
   token). zstd only compresses KV files 1.1 to 1.6×.
 
+![Speedup by prompt length](reports/speedup.png)
+*How many times faster the first token arrives when the saved cache is loaded instead of recomputed. The gain grows with prompt length, because reading cost grows faster than file size.*
+
 ![Ship vs recompute](reports/transfer_breakeven.png)
+*When is copying the cache over a network faster than recomputing it? Each coloured line is "send the file over this link, then answer"; the dashed black line is "recompute from scratch". Any line below the dashed one means shipping wins.*
 
 | | |
 |---|---|
 | ![cache size](reports/cache_size.png) | ![memory](reports/memory.png) |
+| *Cache file size grows linearly with prompt length: 12 KiB per token for Qwen2.5-0.5B, about 112 KiB for Qwen3-1.7B.* | *Peak memory. Restored runs need less than cold ones because nothing is recomputed; on macOS, MLX's allocator figure is more reliable than RSS.* |
 
 ## Reproduce
 
@@ -137,6 +161,13 @@ make quick
 ```
 
 `make quick` is a smoke test: 1k + 4k tokens, one repeat.
+
+```bash
+uv run kvlab demo
+```
+
+`uv run kvlab demo` walks through one save → kill → restore cycle in about
+10 seconds and prints each step (see the screenshot below).
 
 To run individual steps:
 
@@ -212,7 +243,7 @@ kv-lab/
 │   ├── cli.py               kvlab {fetch,llama,mlx,transfer,report,all}
 │   ├── models.py            model registry: GGUF/HF locations, KV geometry
 │   ├── prompts.py           deterministic long prompts, cached token IDs
-│   ├── llama_bench.py       llama-server: cold → save slot → kill → new server → restore → query
+│   ├── llama_bench.py       llama-server: cold → save slot → kill → new server → restore → query; `demo`
 │   ├── mlx_worker.py        one MLX phase per process (cold / save+warm / restore)
 │   ├── mlx_bench.py         drives MLX phases, GPU-contention guard
 │   ├── transfer.py          HTTP transfer of cache files + SHA-256 + zstd
@@ -220,11 +251,18 @@ kv-lab/
 │   └── common.py            timing, peak-RSS sampler, CSV helpers
 ├── results/                 llama_runs.csv, mlx_runs.csv, transfer_runs.csv, summary.csv, prompts/
 ├── reports/                 kv_transfer.md (full write-up), *.png charts, _generated_tables.md
+├── docs/screenshots/        terminal screenshots used in this README
+├── scripts/render_terminal.py  renders captured terminal output to PNG
 └── cache/                   saved KV files (git-ignored)
 ```
 
 ## Screenshots
 
-- TODO: terminal recording of `make quick` (cold vs restored lines)
-- TODO: llama-server log showing `prompt_n = 22` after a slot restore
-- TODO: the TTFT chart as shown on the portfolio page
+![kvlab demo](docs/screenshots/demo_save_restore.png)
+*`uv run kvlab demo`: one live save/restore cycle. Process A reads a 16k-token document, saves its KV cache and exits; a new process B loads the file and answers after computing only the 22 question tokens, with identical output. This is a single run on a busy machine; the tables above use medians of 3.*
+
+![benchmark sweep](docs/screenshots/benchmark_sweep.png)
+*The llama.cpp sweep from 1k to 32k tokens (first repeat of each length, rendered from `results/llama_runs.csv`). Cold time grows from 0.14 s to 24.8 s while restored time stays under 0.1 s, and every output matches.*
+
+Screenshots are rendered from captured terminal output with
+`uv run python scripts/render_terminal.py <output.txt> <out.png> "<command>"`.

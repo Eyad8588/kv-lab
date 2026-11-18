@@ -4,6 +4,7 @@
     uv run kvlab llama    --lengths 1024 4096 16384 --repeats 3 [--models qwen2.5-0.5b]
     uv run kvlab mlx      --lengths 1024 4096 16384 --repeats 3 [--models qwen2.5-0.5b qwen3-1.7b]
     uv run kvlab transfer --repeats 3
+    uv run kvlab demo     [--lengths 16384]          (one save/restore cycle, ~10 s)
     uv run kvlab report
     uv run kvlab all      (everything above, fresh CSVs)
 """
@@ -20,7 +21,7 @@ DEFAULT_LENGTHS = [1024, 2048, 4096, 8192, 16384]
 
 def main():
     ap = argparse.ArgumentParser(prog="kvlab")
-    ap.add_argument("cmd", choices=["llama", "mlx", "transfer", "report", "all", "fetch"])
+    ap.add_argument("cmd", choices=["llama", "mlx", "transfer", "report", "all", "fetch", "demo"])
     ap.add_argument("--lengths", type=int, nargs="+", default=DEFAULT_LENGTHS)
     ap.add_argument("--models", nargs="+", default=None,
                     help="model keys (see models.py); default: llama=qwen2.5-0.5b, "
@@ -42,6 +43,11 @@ def main():
             if spec.gguf() is None and spec.gguf_repo:
                 snapshot_download(spec.gguf_repo, allow_patterns=[spec.gguf_file])
             snapshot_download(spec.hf_repo, allow_patterns=["*.json", "*.safetensors", "*.txt"])
+        return
+
+    if a.cmd == "demo":
+        from . import llama_bench
+        llama_bench.demo((a.models or ["qwen2.5-0.5b"])[0], a.lengths[0] if a.lengths != DEFAULT_LENGTHS else 16384)
         return
 
     if a.fresh or a.cmd == "all":

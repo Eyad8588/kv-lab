@@ -83,6 +83,29 @@ def _chart_ttft(s: pd.DataFrame):
     plt.close(fig)
 
 
+def _chart_speedup(s: pd.DataFrame):
+    """Speedup of 'restored incl. cache load' over cold, by prompt length."""
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    for b, d in s.groupby("series"):
+        d = d.sort_values("prefix_tokens")
+        ax.plot(d["prefix_tokens"], d["speedup_incl_load"], marker="o", lw=2, label=b)
+        last = d.iloc[-1]
+        ax.annotate(f"{last['speedup_incl_load']:.0f}x", (last["prefix_tokens"], last["speedup_incl_load"]),
+                    textcoords="offset points", xytext=(6, -3), fontsize=9)
+    ax.axhline(1, color="k", lw=0.8, ls="--")
+    ax.set_xscale("log", base=2)
+    ax.set_yscale("log")
+    ax.set_xticks([1024, 2048, 4096, 8192, 16384, 32768], ["1k", "2k", "4k", "8k", "16k", "32k"])
+    ax.set_xlabel("prompt prefix length (tokens)")
+    ax.set_ylabel("TTFT speedup, restored vs cold (log)")
+    ax.set_title("Restoring a saved KV cache: speedup grows with prompt length")
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(REPORTS / "speedup.png", dpi=150)
+    plt.close(fig)
+
+
 def _chart_size(s: pd.DataFrame):
     fig, ax = plt.subplots(figsize=(6, 4))
     for b, d in s.groupby("series"):
@@ -192,6 +215,7 @@ def build():
     tr = pd.read_csv(tr_path) if tr_path.exists() else None
     _chart_ttft(s)
     _chart_size(s)
+    _chart_speedup(s)
     _chart_memory(s)
     _chart_breakeven(s, tr)
     (REPORTS / "_generated_tables.md").write_text(

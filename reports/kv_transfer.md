@@ -42,6 +42,10 @@ that exception is explained below.
   general-purpose compressor.
 
 ![TTFT](ttft.png)
+*Time to first token per prompt length (log scale): cold recompute vs a cache restored from file in a new process vs a cache that never left memory.*
+
+![speedup](speedup.png)
+*Speedup of restored over cold, including the time to load the file. It grows with context length.*
 
 ## 1. Setup
 
