@@ -1,12 +1,29 @@
+# Python / uv
 .venv/
 __pycache__/
+*.pyc
+
+# Model weights — never commit
 models/
+*.gguf
+*.safetensors
+*.npz
+
+# Saved KV caches / llama.cpp slot dumps (regenerable, 10 MB - 2 GB each)
 cache/
 *.bin
-*.safetensors
+*.kv
+
+# Raw server logs and per-phase JSON scratch
 results/raw/
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
+# Large-file guard: anything > 50 MB must not be committed (see scripts in README);
+# common big artefacts are listed explicitly above.
+*.tar
+*.zip
+
+# Local tooling
 /graft/
 graft/
 .ignore
+.DS_Store
